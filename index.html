@@ -5,7 +5,66 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Huertas Urbanas – Medellín 2025</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js">
+
+// ===== MAPA DE CALOR =====
+let heatMapInst = null, heatLyr = null, dotLyr = null;
+
+function initHeatMap() {
+  if (heatMapInst) return;
+  heatMapInst = L.map('heatmap', {
+    center: [6.244, -75.574],
+    zoom: 12,
+    scrollWheelZoom: false
+  });
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CartoDB',
+    subdomains: 'abcd',
+    opacity: 0.85
+  }).addTo(heatMapInst);
+
+  // Heat layer from RAW.geo
+  const pts = RAW.geo.map(h => [h.lat, h.lon, 0.8]);
+  heatLyr = L.heatLayer(pts, {
+    radius: 24, blur: 20, maxZoom: 16, max: 1.0,
+    gradient: {0.1:'#313695',0.3:'#4575b4',0.5:'#abd9e9',0.65:'#fee090',0.8:'#f46d43',1.0:'#a50026'}
+  }).addTo(heatMapInst);
+
+  // Dot layer for comparison
+  dotLyr = L.layerGroup();
+  RAW.geo.forEach(h => {
+    const col = h.secretaria.includes('Medio Ambiente') ? '#22c55e'
+               : h.secretaria.includes('Inclusi') ? '#a855f7' : '#f97316';
+    L.circleMarker([h.lat, h.lon], {
+      radius: 4, fillColor: col, color: 'white', weight: 0.5, fillOpacity: 0.9
+    }).bindPopup(`<b>${h.nombre||'Huerta'}</b><br>${h.tipologia}<br><small>${h.secretaria}</small>`).addTo(dotLyr);
+  });
+}
+
+function setHeatMode(mode, btn) {
+  document.querySelectorAll('.hm-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (!heatMapInst) { initHeatMap(); return; }
+  if (mode === 'heat') {
+    if (!heatMapInst.hasLayer(heatLyr)) heatMapInst.addLayer(heatLyr);
+    if (heatMapInst.hasLayer(dotLyr)) heatMapInst.removeLayer(dotLyr);
+  } else {
+    if (!heatMapInst.hasLayer(dotLyr)) heatMapInst.addLayer(dotLyr);
+    if (heatMapInst.hasLayer(heatLyr)) heatMapInst.removeLayer(heatLyr);
+  }
+  setTimeout(() => heatMapInst.invalidateSize(), 100);
+}
+
+// Init when element enters viewport
+const _hmObs = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) { initHeatMap(); _hmObs.disconnect(); } });
+}, {threshold: 0.1});
+document.addEventListener('DOMContentLoaded', () => {
+  const el = document.getElementById('heatmap');
+  if (el) _hmObs.observe(el);
+});
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root{
@@ -147,6 +206,14 @@ footer{text-align:center;padding:16px;font-size:.72rem;color:var(--text2);border
 /* Leaflet multi pulse */
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(220,38,38,.6)}70%{box-shadow:0 0 0 10px rgba(220,38,38,0)}100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}}
 .multi-marker{animation:pulse 1.8s infinite}
+
+/* HEAT MAP CARD */
+.heatmap-box{height:480px;border-radius:0 0 10px 10px;border:1px solid var(--border);overflow:hidden}
+.hm-controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.hm-btn{padding:5px 14px;border-radius:20px;border:1.5px solid var(--g2);background:white;color:var(--g2);font-size:.78rem;font-weight:600;cursor:pointer;transition:all .2s}
+.hm-btn.active,.hm-btn:hover{background:var(--g2);color:white}
+.hm-legend-bar{display:flex;align-items:center;gap:8px;font-size:.72rem;color:var(--text2);margin-top:8px}
+.hm-grad{height:10px;width:160px;border-radius:6px;background:linear-gradient(to right,#313695,#4575b4,#74add1,#abd9e9,#fee090,#fdae61,#f46d43,#d73027,#a50026)}
 </style>
 </head>
 <body>
@@ -277,6 +344,22 @@ footer{text-align:center;padding:16px;font-size:.72rem;color:var(--text2);border
   <div class="card"><h3>📋 Directorio de Huertas</h3>
     <div class="tsearch"><input type="text" id="tableSearch" placeholder="🔍 Buscar…"><span class="rcnt" id="rowCount"></span></div>
     <div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre Huerta</th><th>Tipología</th><th>Secretaría</th><th>PP</th><th>Multi-Sec</th><th>Comuna</th><th>Barrio</th><th>Género</th></tr></thead><tbody id="tableBody"></tbody></table></div>
+  </div>
+
+  <div class="card full" style="margin-top:18px">
+    <h3>🔥 Mapa de Calor — Concentración de Huertas por Zona</h3>
+    <div class="hm-controls">
+      <span style="font-size:.8rem;color:var(--text2);font-weight:600">Vista:</span>
+      <button class="hm-btn active" onclick="setHeatMode('heat',this)">🌡️ Calor</button>
+      <button class="hm-btn" onclick="setHeatMode('dots',this)">📍 Puntos</button>
+      <span style="margin-left:auto;font-size:.75rem;color:var(--text2)">838 huertas georreferenciadas</span>
+    </div>
+    <div id="heatmap" class="heatmap-box"></div>
+    <div class="hm-legend-bar">
+      <span>Baja densidad</span>
+      <div class="hm-grad"></div>
+      <span>Alta densidad</span>
+    </div>
   </div>
 </main>
 </div>
